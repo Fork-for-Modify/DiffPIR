@@ -51,15 +51,15 @@ def main():
     sigma                   = max(0.001,noise_level_img)  # noise level associated with condition y
     lambda_                 = 1.                # key parameter lambda
     sub_1_analytic          = True              # use analytical solution
-    eta                     = 0.0               # eta for ddim samplingn  
-    zeta                    = 1.0                      
-    guidance_scale          = 1.0   
-    
+    eta                     = 0.0               # eta for ddim samplingn
+    zeta                    = 1.0
+    guidance_scale          = 1.0
+
     model_out_type          = 'pred_xstart'     # model output type: pred_x_prev; pred_xstart; epsilon; score
     generate_mode           = 'DiffPIR'           # repaint; vanilla; DiffPIR
     skip_type               = 'quad'            # uniform, quad
     ddim_sample             = False             # sampling method
-    
+
     log_process             = False
     task_current            = 'ip'              # 'ip' for inpainting
     n_channels              = 3                 # fixed
@@ -73,8 +73,8 @@ def main():
     torch.cuda.empty_cache()
 
     calc_LPIPS              = True
-    
-    # noise schedule 
+
+    # noise schedule
     beta_start              = 0.1 / 1000
     beta_end                = 20 / 1000
     betas                   = np.linspace(beta_start, beta_end, num_train_timesteps, dtype=np.float32)
@@ -90,7 +90,7 @@ def main():
 
     noise_inti_img          = 50 / 255
     t_start                 = utils_model.find_nearest(reduced_alpha_cumprod, 2 * noise_inti_img) # start timestep of the diffusion process
-    t_start                 = num_train_timesteps - 1    
+    t_start                 = num_train_timesteps - 1
 
     # ----------------------------------------
     # L_path, E_path, H_path, mask_path
@@ -173,7 +173,7 @@ def main():
                 mask = mask_gen(util.uint2tensor4(img_H)).numpy()
                 mask = np.squeeze(mask)
                 mask = np.transpose(mask, (1, 2, 0))
-                
+
             img_L = img_H * mask  / 255.   #(256,256,3)         [0,1]
 
             np.random.seed(seed=0)  # for reproducibility
@@ -184,14 +184,14 @@ def main():
 
             y = util.single2tensor4(img_L).to(device)   #(1,3,256,256)
             y = y * 2 -1        # [-1,1]
-            mask = util.single2tensor4(mask.astype(np.float32)).to(device) 
-            
+            mask = util.single2tensor4(mask.astype(np.float32)).to(device)
+
             # for y with given noise level, add noise from t_y
             t_y = utils_model.find_nearest(reduced_alpha_cumprod, 2 * noise_level_img)
             sqrt_alpha_effective = sqrt_alphas_cumprod[t_start] / sqrt_alphas_cumprod[t_y]
             x = sqrt_alpha_effective * y + torch.sqrt(sqrt_1m_alphas_cumprod[t_start]**2 - \
                     sqrt_alpha_effective**2 * sqrt_1m_alphas_cumprod[t_y]**2) * torch.randn_like(y)
-            # x = sqrt_alphas_cumprod[t_start] * y + sqrt_1m_alphas_cumprod[t_start] * torch.randn_like(y)   
+            # x = sqrt_alphas_cumprod[t_start] * y + sqrt_1m_alphas_cumprod[t_start] * torch.randn_like(y)
 
             # --------------------------------
             # (3) get rhos and sigmas
@@ -207,7 +207,7 @@ def main():
                 elif model_out_type == 'pred_x_prev':
                     sigma_ks.append(torch.sqrt(betas[i]/alphas[i]))
                 rhos.append(lambda_*(sigma**2)/(sigma_ks[i]**2))
-                     
+
             rhos, sigmas, sigma_ks = torch.tensor(rhos).to(device), torch.tensor(sigmas).to(device), torch.tensor(sigma_ks).to(device)
 
             # --------------------------------
@@ -258,12 +258,12 @@ def main():
                     # --------------------------------
 
                     # analytic solution
-                    if (generate_mode == 'DiffPIR') and not (seq[i] == seq[-1]): 
+                    if (generate_mode == 'DiffPIR') and not (seq[i] == seq[-1]):
                         # solve sub-problem
                         if sub_1_analytic:
                             if model_out_type == 'pred_xstart':
                                 # when noise level less than given image noise, skip
-                                if i < num_train_timesteps-noise_model_t:    
+                                if i < num_train_timesteps-noise_model_t:
                                     x0_p = (mask*y + rhos[t_i].float()*x0).div(mask+rhos[t_i])
                                     x0 = x0 + guidance_scale * (x0_p-x0)
                                 else:
@@ -273,25 +273,25 @@ def main():
                                     pass
                             elif model_out_type == 'pred_x_prev':
                                 # when noise level less than given image noise, skip
-                                if i < num_train_timesteps-noise_model_t:    
+                                if i < num_train_timesteps-noise_model_t:
                                     x = (mask*y + rhos[t_i].float()*x).div(mask+rhos[t_i]) # y-->yt ?
                                 else:
                                     pass
                         else:
                             # TODO: first order solver
-                            # x = x - 1 / (2*rhos[t_i]) * (x - y_t) * mask 
+                            # x = x - 1 / (2*rhos[t_i]) * (x - y_t) * mask
                             pass
 
                     if (model_out_type == 'pred_xstart') and not (seq[i] == seq[-1]):
                         # x = sqrt_alphas_cumprod[t_i] * (x) + (sqrt_1m_alphas_cumprod[t_i]) *  torch.randn_like(x) # x = sqrt_alphas_cumprod[t_i] * (x) + (sqrt_1m_alphas_cumprod[t_i]) *  torch.randn_like(x)
-                        
+
                         t_im1 = utils_model.find_nearest(reduced_alpha_cumprod,sigmas[seq[i+1]].cpu().numpy())
                         # calculate \hat{\eposilon}
                         eps = (x - sqrt_alphas_cumprod[t_i] * x0) / sqrt_1m_alphas_cumprod[t_i]
                         eta_sigma = eta * sqrt_1m_alphas_cumprod[t_im1] / sqrt_1m_alphas_cumprod[t_i] * torch.sqrt(betas[t_i])
                         x = sqrt_alphas_cumprod[t_im1] * x0 + np.sqrt(1-zeta) * (torch.sqrt(sqrt_1m_alphas_cumprod[t_im1]**2 - eta_sigma**2) * eps \
                                     + eta_sigma * torch.randn_like(x)) + np.sqrt(zeta) * sqrt_1m_alphas_cumprod[t_im1] * torch.randn_like(x)
-                        
+
                     # set back to x_t from x_{t-1}
                     if u < iter_num_U-1 and seq[i] != seq[-1]:
                         # x = torch.sqrt(alphas[t_i]) * x + torch.sqrt(betas[t_i]) * torch.randn_like(x)
@@ -319,12 +319,12 @@ def main():
             # --------------------------------
             # (4) save process
             # --------------------------------
-            
+
             img_E = util.tensor2uint(x_0)
-                
+
             psnr = util.calculate_psnr(img_E, img_H, border=0)  # change with your own border
             test_results['psnr'].append(psnr)
-                    
+
             if calc_LPIPS:
                 img_H_tensor = np.transpose(img_H, (2, 0, 1))
                 img_H_tensor = torch.from_numpy(img_H_tensor)[None,:,:,:].to(device)

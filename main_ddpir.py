@@ -72,7 +72,7 @@ class CustomDataset(Dataset):
                 k = kernels[0, k_index].astype(np.float32)
         else:
             k = torch.ones((1,1,1,1)) # dummy kernel
-        
+
         # --------------------------------
         # get img_L
         # --------------------------------
@@ -83,7 +83,7 @@ class CustomDataset(Dataset):
         if self.config.task == "sr":
             img_H_tensor = np.transpose(img_H, (2, 0, 1))
             img_H_tensor = torch.from_numpy(img_H_tensor)[None,:,:,:].to(self.config.device)
-            img_H_tensor = img_H_tensor / 255 
+            img_H_tensor = img_H_tensor / 255
             down_sample = Resizer(img_H_tensor.shape, 1/self.config.sf).to(self.config.device)
             if self.config.sr_mode == 'blur':
                 img_L = util.imresize_np(util.uint2single(img_H), 1/self.config.sf)
@@ -197,7 +197,7 @@ def main():
         config.noise_model_t = 0
 
     if config.noise_init_img == 'max':
-        config.t_start = config.num_train_timesteps - 1   
+        config.t_start = config.num_train_timesteps - 1
     else:
         config.t_start = utils_model.find_nearest(reduced_alpha_cumprod, 2 * config.noise_init_img / 255) # start timestep of the diffusion process
 
@@ -248,7 +248,7 @@ def main():
     # main function
     # ----------------------------------------
 
-    def test_rho(config): 
+    def test_rho(config):
         parameters = f'eta{config.eta}, zeta{config.zeta}, lambda{config.lambda_}, guidance_scale{config.guidance_scale}'
         parameters = parameters + f', inIter{config.inIter}, gamma{config.gamma}' if (config.task == "sr" and config.sr_mode == 'cubic') else parameters
         logger.info(parameters)
@@ -268,11 +268,11 @@ def main():
             img_L = img_L.numpy()
             k = k.numpy()
             mask = mask.numpy()
-            
+
             # --------------------------------
             # (2) get rhos and sigmas
-            # -------------------------------- 
-            
+            # --------------------------------
+
             sigmas = []
             sigma_ks = []
             rhos = []
@@ -284,9 +284,9 @@ def main():
                 else:
                     sigma_ks.append(torch.sqrt(betas[i]/alphas[i]))
                 rhos.append(config.lambda_*(config.sigma**2)/(sigma_ks[i]**2))
-                    
+
             rhos, sigmas, sigma_ks = torch.tensor(rhos).to(config.device), torch.tensor(sigmas).to(config.device), torch.tensor(sigma_ks).to(config.device)
-            
+
             # --------------------------------
             # (3) initialize x, and pre-calculation
             # --------------------------------
@@ -318,7 +318,7 @@ def main():
             # x = torch.randn_like(x)
 
             if config.task in ['sr', 'deblur']:
-                k_tensor = util.single2tensor4_batch(np.expand_dims(k, 3)).to(config.device) 
+                k_tensor = util.single2tensor4_batch(np.expand_dims(k, 3)).to(config.device)
                 FB, FBC, F2B, FBFy = sr.pre_calculate(y, k_tensor, config.sf)
 
             # --------------------------------
@@ -339,7 +339,7 @@ def main():
             progress_seq = seq[::max(len(seq)//10,1)]
             if progress_seq[-1] != seq[-1]:
                 progress_seq.append(seq[-1])
-            
+
             # reverse diffusion for one image from random noise
             for i in range(len(seq)):
                 curr_sigma = sigmas[seq[i]].cpu().numpy()
@@ -391,7 +391,7 @@ def main():
 
                                     tau = rhos[t_i].float().repeat(1, 1, 1, 1)
                                     # when noise level less than given image noise, skip
-                                    if i < config.num_train_timesteps-config.noise_model_t: 
+                                    if i < config.num_train_timesteps-config.noise_model_t:
                                         if config.task == "inpaint":
                                             x0_p = (mask * (2*y-1) + tau * x0).div(mask + tau)
                                             x0 = x0 + config.guidance_scale * (x0_p-x0)
@@ -401,7 +401,7 @@ def main():
                                             x0_p = x0_p * 2 - 1
                                             # effective x0
                                             x0 = x0 + config.guidance_scale * (x0_p-x0)
-                                        elif config.sr_mode == 'cubic': 
+                                        elif config.sr_mode == 'cubic':
                                             # iterative back-projection (IBP) solution
                                             for _ in range(config.inIter):
                                                 x0 = x0 / 2 + 0.5
@@ -416,7 +416,7 @@ def main():
                                         pass
                                 elif model_out_type == 'pred_x_prev' and config.task == "inpaint":
                                     # when noise level less than given image noise, skip
-                                    if i < config.num_train_timesteps-config.noise_model_t: 
+                                    if i < config.num_train_timesteps-config.noise_model_t:
                                         x = (mask * (2*y-1) + tau * x0).div(mask + tau) # y-->yt ?
                                     else:
                                         pass
@@ -426,16 +426,16 @@ def main():
                                 # first order solver
                                 measurement = y if config.task == "deblur" else 2*y-1
                                 norm_grad, norm = utils_model.grad_and_value(operator=degrade_op,x=x0, x_hat=x0, measurement=measurement)
-                                                    
-                                x0 = x0 - norm_grad * norm / (rhos[t_i]) 
+
+                                x0 = x0 - norm_grad * norm / (rhos[t_i])
                                 x0 = x0.detach_()
-                                pass                          
-                        elif 'DPS' in config.generate_mode:                    
+                                pass
+                        elif 'DPS' in config.generate_mode:
                             if config.generate_mode == 'DPS_y0':
                                 measurement = y if config.task == "deblur" else 2*y-1
                                 norm_grad, norm = utils_model.grad_and_value(operator=degrade_op,x=x, x_hat=x0, measurement=measurement)
                                 #norm_grad, norm = utils_model.grad_and_value(operator=degrade_op,x=xt, x_hat=x0, measurement=2*y-1)    # does not work
-                                x = xt - norm_grad * 1. #norm / (2*rhos[t_i]) 
+                                x = xt - norm_grad * 1. #norm / (2*rhos[t_i])
                                 x = x.detach_()
                                 pass
                             elif config.generate_mode == 'DPS_yt':
@@ -446,11 +446,11 @@ def main():
                                 x = xt - norm_grad * config.lambda_ * norm / (rhos[t_i]) * 0.35
                                 x = x.detach_()
                                 pass
-                        
+
                     # add noise back to t=i-1
                     if ((config.task == "inpaint" or config.generate_mode == 'DiffPIR') and model_out_type == 'pred_xstart') and not (seq[i] == seq[-1] and u == config.iter_num_U-1):
                         #x = sqrt_alphas_cumprod[t_i] * (x0) + (sqrt_1m_alphas_cumprod[t_i]) *  torch.randn_like(x)
-                        
+
                         t_im1 = utils_model.find_nearest(reduced_alpha_cumprod,sigmas[seq[i+1]].cpu().numpy())
                         # calculate \hat{\eposilon}
                         eps = (x - sqrt_alphas_cumprod[t_i] * x0) / sqrt_1m_alphas_cumprod[t_i]
@@ -460,7 +460,7 @@ def main():
                     else:
                         #x = x0
                         pass
-                        
+
                     # set back to x_t from x_{t-1}
                     if u < config.iter_num_U-1 and seq[i] != seq[-1]:
                         ### it's equivalent to use x & xt (?), but with xt the computation is faster.
@@ -488,7 +488,7 @@ def main():
             img_H_tensor = img_H_tensor / 255 * 2 -1
             psnr = util.calculate_psnr_batch(x_0.detach()*2-1, img_H_tensor)
             test_results['psnr'].append(psnr * batch_size)
-            
+
             if config.calc_LPIPS:
                 lpips_score = loss_fn_vgg(x_0.detach()*2-1, img_H_tensor)
                 lpips_score = lpips_score.cpu().detach().numpy()[0][0][0][0]
@@ -518,7 +518,7 @@ def main():
                 img_H_y = util.rgb2ycbcr_batch(img_H_tensor, only_y=True)
                 psnr_y = util.calculate_psnr_batch(img_E_y, img_H_y)
                 test_results['psnr_y'].append(psnr_y * batch_size)
-            
+
         # --------------------------------
         # Average PSNR and LPIPS for all images
         # --------------------------------
@@ -535,7 +535,7 @@ def main():
         if config.calc_LPIPS:
             ave_lpips = sum(test_results['lpips']) / total_num
             logger.info(f'-----------> Average LPIPS of ({config.testset_name}) scale factor: ({config.sf}), sigma: ({config.noise_level_model:.3f}): {ave_lpips:.4f}')
-            test_results_ave['lpips'].append(ave_lpips)    
+            test_results_ave['lpips'].append(ave_lpips)
         return test_results_ave
 
 

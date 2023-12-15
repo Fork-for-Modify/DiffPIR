@@ -676,7 +676,7 @@ class Blurkernel(nn.Module):
             k = torch.from_numpy(k).to(self.device)
         for name, f in self.named_parameters():
             f.data.copy_(k)
-
+    
     def get_kernel(self):
         return self.k
 
@@ -688,7 +688,7 @@ class MotionBlurOperator():
                                kernel_size=kernel_size,
                                std=intensity,
                                device=device).to(device)  # should we keep this device term?
-
+        
         self.kernel = Kernel(size=(kernel_size, kernel_size), intensity=intensity)
         kernel = torch.tensor(self.kernel.kernelMatrix, dtype=torch.float32)
         self.conv.update_weights(kernel)

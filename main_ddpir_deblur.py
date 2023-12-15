@@ -45,30 +45,30 @@ def main():
     save_LEH                = False             # save zoomed LR, E and H images
     save_progressive        = False             # save generation process
     border                  = 0
-	
+
     sigma                   = max(0.001,noise_level_img)  # noise level associated with condition y
     lambda_                 = 1.0               # key parameter lambda
     sub_1_analytic          = True              # use analytical solution
-    
+
     log_process             = False
     ddim_sample             = False             # sampling method
     model_output_type       = 'pred_xstart'     # model output type: pred_x_prev; pred_xstart; epsilon; score
     generate_mode           = 'DiffPIR'         # DiffPIR; DPS; vanilla
     skip_type               = 'quad'            # uniform, quad
     eta                     = 0.0               # eta for ddim sampling
-    zeta                    = 0.1  
-    guidance_scale          = 1.0   
+    zeta                    = 0.1
+    guidance_scale          = 1.0
 
     calc_LPIPS              = True
     use_DIY_kernel          = True
-    blur_mode               = 'Gaussian'          # Gaussian; motion      
+    blur_mode               = 'Gaussian'          # Gaussian; motion
     kernel_size             = 61
     kernel_std              = 3.0 if blur_mode == 'Gaussian' else 0.5
 
     sf                      = 1
-    task_current            = 'deblur'          
+    task_current            = 'deblur'
     n_channels              = 3                 # fixed
-    cwd                     = ''  
+    cwd                     = ''
     model_zoo               = os.path.join(cwd, 'model_zoo')    # fixed
     testsets                = os.path.join(cwd, 'testsets')     # fixed
     results                 = os.path.join(cwd, 'results')      # fixed
@@ -77,25 +77,25 @@ def main():
     device                  = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     torch.cuda.empty_cache()
 
-    # noise schedule 
+    # noise schedule
     beta_start              = 0.1 / 1000
     beta_end                = 20 / 1000
-    betas                   = np.linspace(beta_start, beta_end, num_train_timesteps, dtype=np.float32)
+    betas                   = np.linspace(beta_start, beta_end, num_train_timesteps, dtype=np.float32) # beta_t
     betas                   = torch.from_numpy(betas).to(device)
-    alphas                  = 1.0 - betas
-    alphas_cumprod          = np.cumprod(alphas.cpu(), axis=0)
-    sqrt_alphas_cumprod     = torch.sqrt(alphas_cumprod)
+    alphas                  = 1.0 - betas # alpha_t
+    alphas_cumprod          = np.cumprod(alphas.cpu(), axis=0) # alpha_bar_t
+    sqrt_alphas_cumprod     = torch.sqrt(alphas_cumprod) # sqrt(alpha_bar_t)
     sqrt_1m_alphas_cumprod  = torch.sqrt(1. - alphas_cumprod)
-    reduced_alpha_cumprod   = torch.div(sqrt_1m_alphas_cumprod, sqrt_alphas_cumprod)        # equivalent noise sigma on image
+    reduced_alpha_cumprod   = torch.div(sqrt_1m_alphas_cumprod, sqrt_alphas_cumprod)        # equivalent noise sigma on image (sigma_bar_t)
 
     noise_model_t           = utils_model.find_nearest(reduced_alpha_cumprod, 2 * noise_level_model)
-    noise_model_t           = 0
-    
+    noise_model_t           = 0 # zzh: why override the above line?
+
     noise_inti_img          = 50 / 255
     t_start                 = utils_model.find_nearest(reduced_alpha_cumprod, 2 * noise_inti_img) # start timestep of the diffusion process
-    t_start                 = num_train_timesteps - 1              
+    t_start                 = num_train_timesteps - 1 # zzh: why override the above line?
 
-    
+
     # ----------------------------------------
     # L_path, E_path, H_path
     # ----------------------------------------
@@ -145,11 +145,11 @@ def main():
     logger.info('Model path: {:s}'.format(model_path))
     logger.info(L_path)
     L_paths = util.get_image_paths(L_path)
-    
+
     if calc_LPIPS:
         import lpips
         loss_fn_vgg = lpips.LPIPS(net='vgg').to(device)
-    
+
     def test_rho(lambda_=lambda_, zeta=zeta, model_output_type=model_output_type):
         logger.info('eta:{:.3f}, zeta:{:.3f}, lambda:{:.3f}, guidance_scale:{:.2f}'.format(eta, zeta, lambda_, guidance_scale))
         test_results = OrderedDict()
@@ -177,8 +177,8 @@ def main():
             util.imsave(k*255.*200, os.path.join(E_path, f'motion_kernel_{img_name}{ext}'))
             #np.save(os.path.join(E_path, 'motion_kernel.npy'), k)
             k_4d = torch.from_numpy(k).to(device)
-            k_4d = torch.einsum('ab,cd->abcd',torch.eye(3).to(device),k_4d)
-            
+            k_4d = torch.einsum('ab,cd->abcd',torch.eye(3).to(device),k_4d) # outer product, [3,3,61,61]
+
             model_out_type = model_output_type
 
             # --------------------------------
@@ -195,17 +195,17 @@ def main():
             img_L = util.uint2single(img_L)
 
             np.random.seed(seed=0)  # for reproducibility
-            img_L = img_L * 2 - 1
+            img_L = img_L * 2 - 1   # normalize from [0,1] to [-1, 1]
             img_L += np.random.normal(0, noise_level_img * 2, img_L.shape) # add AWGN
-            img_L = img_L / 2 + 0.5
+            img_L = img_L / 2 + 0.5 # [-1,1] back to [0,1]
 
             # --------------------------------
             # (2) get rhos and sigmas
             # --------------------------------
 
-            sigmas = []
-            sigma_ks = []
-            rhos = []
+            sigmas = [] # image noise level sigma (reversed sigma_bar_t)
+            sigma_ks = []  # sigma_bar_t
+            rhos = [] # pho_t
             for i in range(num_train_timesteps):
                 sigmas.append(reduced_alpha_cumprod[num_train_timesteps-1-i])
                 if model_out_type == 'pred_xstart' and generate_mode == 'DiffPIR':
@@ -213,9 +213,9 @@ def main():
                 #elif model_out_type == 'pred_x_prev':
                 else:
                     sigma_ks.append(torch.sqrt(betas[i]/alphas[i]))
-                rhos.append(lambda_*(sigma**2)/(sigma_ks[i]**2))    
+                rhos.append(lambda_*(sigma**2)/(sigma_ks[i]**2))
             rhos, sigmas, sigma_ks = torch.tensor(rhos).to(device), torch.tensor(sigmas).to(device), torch.tensor(sigma_ks).to(device)
-            
+
             # --------------------------------
             # (3) initialize x, and pre-calculation
             # --------------------------------
@@ -224,12 +224,13 @@ def main():
 
             y = util.single2tensor4(img_L).to(device)   #(1,3,256,256)
 
-            # for y with given noise level, add noise from t_y
-            t_y = utils_model.find_nearest(reduced_alpha_cumprod, 2 * noise_level_img)
+            # for y with given noise level, add noise from t_y (not start from gaussian noise)
+            t_y = utils_model.find_nearest(reduced_alpha_cumprod, 2 * noise_level_img) # start timestep of the diffusion process
             sqrt_alpha_effective = sqrt_alphas_cumprod[t_start] / sqrt_alphas_cumprod[t_y]
+            # start point for reverse process ('2*y-1' is for normalization to [-1,1])
             x = sqrt_alpha_effective * (2*y-1) + torch.sqrt(sqrt_1m_alphas_cumprod[t_start]**2 - \
-                    sqrt_alpha_effective**2 * sqrt_1m_alphas_cumprod[t_y]**2) * torch.randn_like(y)
-            # x = torch.randn_like(y)
+                    sqrt_alpha_effective**2 * sqrt_1m_alphas_cumprod[t_y]**2) * torch.randn_like(y) #zzh: which equation
+            # x = torch.randn_like(y) # start from gaussian noise
 
             k_tensor = util.single2tensor4(np.expand_dims(k, 2)).to(device)
 
@@ -251,8 +252,8 @@ def main():
                 seq[-1] = seq[-1] - 1
             progress_seq = seq[::max(len(seq)//10,1)]
             if progress_seq[-1] != seq[-1]:
-                progress_seq.append(seq[-1])
-            
+                progress_seq.append(seq[-1]) # add the end point if not included
+
             # reverse diffusion for one image from random noise
             for i in range(len(seq)):
                 curr_sigma = sigmas[seq[i]].cpu().numpy()
@@ -278,7 +279,7 @@ def main():
                     #   model_out_type=model_out_type, diffusion=diffusion, ddim_sample=ddim_sample, alphas_cumprod=alphas_cumprod)
 
                     # --------------------------------
-                    # step 2, FFT
+                    # step 2, FFT (data subproblem)
                     # --------------------------------
 
                     if seq[i] != seq[-1]:
@@ -286,8 +287,8 @@ def main():
                             if sub_1_analytic:
                                 if model_out_type == 'pred_xstart':
                                     tau = rhos[t_i].float().repeat(1, 1, 1, 1)
-                                    # when noise level less than given image noise, skip
-                                    if i < num_train_timesteps-noise_model_t: 
+                                    # when noise level less than given image noise, skip. (SNR is high enough, measurement is not needed, only use diffusion model to denoise)
+                                    if i < num_train_timesteps-noise_model_t:
                                         x0_p = x0 / 2 + 0.5
                                         x0_p = sr.data_solution(x0_p.float(), FB, FBC, F2B, FBFy, tau, sf)
                                         x0_p = x0_p * 2 - 1
@@ -312,18 +313,18 @@ def main():
                                 norm_grad, norm = utils_model.grad_and_value(operator=Tx,x=x0, x_hat=x0, measurement=y)
                                 x0 = x0 - norm_grad * norm / (rhos[t_i])
                                 x0 = x0.detach_()
-                                pass                               
+                                pass
                         elif 'DPS' in generate_mode:
                             def Tx(x):
                                 x = x / 2 + 0.5
                                 pad_2d = torch.nn.ReflectionPad2d(k.shape[0]//2)
                                 x_deblur = F.conv2d(pad_2d(x), k_4d)
                                 return x_deblur
-                                #return kernel.forward(x)                         
+                                #return kernel.forward(x)
                             if generate_mode == 'DPS_y0':
                                 norm_grad, norm = utils_model.grad_and_value(operator=Tx,x=x, x_hat=x0, measurement=y)
                                 #norm_grad, norm = utils_model.grad_and_value(operator=Tx,x=xt, x_hat=x0, measurement=y)    # does not work
-                                x = xt - norm_grad * 1. #norm / (2*rhos[t_i]) 
+                                x = xt - norm_grad * 1. #norm / (2*rhos[t_i])
                                 x = x.detach_()
                                 pass
                             elif generate_mode == 'DPS_yt':
@@ -338,17 +339,23 @@ def main():
 
                     if (generate_mode == 'DiffPIR' and model_out_type == 'pred_xstart') and not (seq[i] == seq[-1] and u == iter_num_U-1):
                         #x = sqrt_alphas_cumprod[t_i] * (x0) + (sqrt_1m_alphas_cumprod[t_i]) *  torch.randn_like(x)
-                        
+
+                        # find next time step in reverse process, i.e., t-1 or i-1
                         t_im1 = utils_model.find_nearest(reduced_alpha_cumprod,sigmas[seq[i+1]].cpu().numpy())
+
                         # calculate \hat{\eposilon}
                         eps = (x - sqrt_alphas_cumprod[t_i] * x0) / sqrt_1m_alphas_cumprod[t_i]
+
+                        # sigma_eta
                         eta_sigma = eta * sqrt_1m_alphas_cumprod[t_im1] / sqrt_1m_alphas_cumprod[t_i] * torch.sqrt(betas[t_i])
+
+                        # x_{t-1}, Eq.14-15, refer to https://github.com/yuanzhi-zhu/DiffPIR/issues/23
                         x = sqrt_alphas_cumprod[t_im1] * x0 + np.sqrt(1-zeta) * (torch.sqrt(sqrt_1m_alphas_cumprod[t_im1]**2 - eta_sigma**2) * eps \
                                     + eta_sigma * torch.randn_like(x)) + np.sqrt(zeta) * sqrt_1m_alphas_cumprod[t_im1] * torch.randn_like(x)
                     else:
                         # x = x0
                         pass
-                        
+
                     # set back to x_t from x_{t-1}
                     if u < iter_num_U-1 and seq[i] != seq[-1]:
                         # x = torch.sqrt(alphas[t_i]) * x + torch.sqrt(betas[t_i]) * torch.randn_like(x)
@@ -366,7 +373,7 @@ def main():
                     progress_img.append(x_show)
                     if log_process:
                         logger.info('{:>4d}, steps: {:>4d}, np.max(x_show): {:.4f}, np.min(x_show): {:.4f}'.format(seq[i], t_i, np.max(x_show), np.min(x_show)))
-                    
+
                     if show_img:
                         util.imshow(x_show)
 
@@ -376,10 +383,10 @@ def main():
             # --------------------------------
 
             img_E = util.tensor2uint(x_0)
-                
+
             psnr = util.calculate_psnr(img_E, img_H, border=border)  # change with your own border
             test_results['psnr'].append(psnr)
-            
+
             if calc_LPIPS:
                 img_H_tensor = np.transpose(img_H, (2, 0, 1))
                 img_H_tensor = torch.from_numpy(img_H_tensor)[None,:,:,:].to(device)
@@ -404,7 +411,7 @@ def main():
                 if show_img:
                     util.imshow(img_total,figsize=(80,4))
                 util.imsave(img_total*255., os.path.join(E_path, img_name+'_sigma_{:.3f}_process_lambda_{:.3f}_{}_psnr_{:.4f}{}'.format(noise_level_img,lambda_,current_time,psnr,ext)))
-                                                                            
+
             # --------------------------------
             # (4) img_LEH
             # --------------------------------
@@ -422,7 +429,7 @@ def main():
 
             if save_L:
                 util.imsave(util.single2uint(img_L), os.path.join(E_path, img_name+'_LR'+ext))
-        
+
         # --------------------------------
         # Average PSNR and LPIPS
         # --------------------------------
@@ -435,9 +442,9 @@ def main():
             ave_lpips = sum(test_results['lpips']) / len(test_results['lpips'])
             logger.info('------> Average LPIPS of ({}) sigma: ({:.3f}): {:.4f}'.format(testset_name, noise_level_model, ave_lpips))
 
-    
+
     # experiments
-    lambdas = [lambda_*i for i in range(7,8)]
+    lambdas = [lambda_*i for i in range(7,8)] # hyperparameter finetuning
     for lambda_ in lambdas:
         for zeta_i in [zeta*i for i in range(3,4)]:
             test_rho(lambda_, zeta=zeta_i, model_output_type=model_output_type)

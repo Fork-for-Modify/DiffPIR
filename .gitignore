@@ -10,5 +10,4 @@ slurm_log/
 *.Identifier
 *.pdf
 results/
-motionblur/
 DiffPIR_env/
